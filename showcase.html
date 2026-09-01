@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phox — a model that learns while it runs</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121721; --panel2:#0e131c; --line:#1e2634;
+    --ink:#e6edf3; --dim:#8b98a9; --accent:#5eead4; --accent2:#7c9cff;
+    --cyan:#00d4ff; --pink:#ff2d78; --gold:#ffd600; --radius:14px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#13203050,transparent),var(--bg);
+       color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1280px;margin:0 auto;padding:24px 20px 70px}
+  header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+  .logo{font-family:var(--mono);font-weight:700;font-size:26px;letter-spacing:-.5px}
+  .logo b{color:var(--accent)}
+  .tag{color:var(--dim);font-size:15px}
+  .tag b{color:var(--ink);font-weight:600}
+  .sub{color:var(--dim);max-width:820px;margin:8px 0 20px;font-size:14.5px}
+  .sub b{color:var(--ink);font-weight:600}
+  .live{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;
+        box-shadow:0 0 8px var(--accent);animation:pulse 1.6s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .grid{display:grid;grid-template-columns:1.55fr 1fr;gap:16px}
+  @media(max-width:940px){.grid{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+         border-radius:var(--radius);padding:16px}
+  .panel h2{margin:0 0 3px;font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);font-weight:600}
+  .panel .note{color:var(--dim);font-size:12px;margin:0 0 12px}
+  /* visualizer */
+  .viz{position:relative;padding:0;overflow:hidden}
+  #cvs{width:100%;height:520px;display:block;background:
+       radial-gradient(600px 400px at 50% 40%,#0d1622,transparent),#080b11}
+  @media(max-width:940px){#cvs{height:380px}}
+  .vizcap{position:absolute;left:14px;bottom:12px;font-family:var(--mono);font-size:11px;color:var(--dim);
+          max-width:70%;pointer-events:none}
+  /* chat */
+  #log{height:250px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding-right:6px}
+  .msg{padding:9px 12px;border-radius:12px;max-width:90%;white-space:pre-wrap;font-size:14px}
+  .me{align-self:flex-end;background:#1b2740;border:1px solid #26365a}
+  .ai{align-self:flex-start;background:#0f1620;border:1px solid var(--line)}
+  .ai.think{color:var(--dim);font-style:italic}
+  .row{display:flex;gap:8px;margin-top:11px}
+  input,button{font-family:inherit;font-size:14px}
+  input{flex:1;background:#0a0f18;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 12px;outline:none}
+  input:focus{border-color:var(--accent2)}
+  button{background:var(--accent);color:#04201b;border:none;border-radius:10px;padding:9px 15px;font-weight:600;cursor:pointer;white-space:nowrap}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:default}
+  .teachgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  /* monologue */
+  .mono{font-family:var(--mono);font-size:12.5px;line-height:1.6;color:#9fd0ff;background:#0a1018;
+        border:1px solid var(--line);border-radius:10px;padding:11px 13px;min-height:64px;white-space:pre-wrap}
+  .mono.idle{color:var(--dim);font-style:italic}
+  /* telemetry */
+  .kpi{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .kpi:last-child{border:0}
+  .kpi span:first-child{color:var(--dim)}
+  .kpi b{font-family:var(--mono);color:var(--ink);font-weight:600}
+  .routes .r{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;margin:3px 0;color:var(--dim)}
+  .routes .r.win{color:var(--ink)}
+  .routes .bar2{flex:1;height:5px;background:#0a0f18;border-radius:3px;overflow:hidden}
+  .routes .bar2>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+  .recall{margin-top:6px;padding:10px 12px;border-radius:10px;border:1px dashed var(--line);font-size:12.5px;color:var(--dim)}
+  .recall.hit{border-color:var(--accent);color:var(--ink);background:#0c1a18}
+  .bar{height:6px;border-radius:4px;background:#0a0f18;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));width:0;transition:width .3s}
+  .dials{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:var(--dim)}
+  .dials input[type=range]{flex:1;accent-color:var(--accent)}
+  .stat{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0 6px}
+  .stat .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .stat .c .n{font-family:var(--mono);font-size:21px;color:var(--accent);font-weight:700}
+  .stat .c .l{color:var(--dim);font-size:12px;margin-top:2px}
+  .foot{margin-top:24px;color:var(--dim);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+  .foot b{color:var(--ink)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--accent);border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><b>Phox</b></div>
+    <div class="tag">a small language model that <b>learns while it runs</b></div>
+    <div style="margin-left:auto;font-size:12.5px;color:var(--dim)"><span class="live"></span><span id="hostline">connecting…</span></div>
+  </header>
+  <p class="sub">
+    The panel on the left is the model's <b>actual internal state</b> — each token is a ring of coupled
+    oscillators, drawn at its real measured phase; rings ride the rim and spiral out as they leave context.
+    It's always moving because the model keeps an <b>inner monologue</b> running underneath. Teach it a fact
+    in one shot and it recalls it later <b>by association</b>. Everything here is the live engine on real hardware.
+  </p>
+
+  <div class="grid">
+    <!-- LEFT: the visualizer -->
+    <div class="col">
+      <div class="panel viz">
+        <canvas id="cvs"></canvas>
+        <div class="vizcap">radius = real oscillator phase · yellow ring = order parameter · lines = coupling law · clouds = inner monologue</div>
+      </div>
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:8px">
+          <h2 style="margin:0">Inner monologue <span class="pill" id="voice-pill">always on</span></h2>
+          <span style="flex:1"></span>
+          <button class="ghost" id="v-start" style="padding:5px 11px;font-size:12px">Start</button>
+          <button class="ghost" id="v-stop" style="padding:5px 11px;font-size:12px">Stop</button>
+        </div>
+        <p class="note">A second stream the model runs to itself between your messages — a residual-state nudge, never added to the transcript. Every thought is logged to <code style="color:var(--dim)">voice.jsonl</code>.</p>
+        <div class="mono idle" id="mono">(quiet)</div>
+        <div id="couplings" style="margin-top:11px"></div>
+        <div style="margin-top:10px"><div class="note" style="margin:0 0 5px">recent thoughts (from the log)</div>
+          <div id="vlog" style="max-height:150px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--dim)"></div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: chat + teach + telemetry -->
+    <div class="col">
+      <div class="panel">
+        <h2>Live inference</h2>
+        <p class="note">Wave-equilibrium forward pass — each answer settles to a fixed point, streamed.</p>
+        <div id="log"></div>
+        <div class="row"><input id="q" placeholder="Ask Phox something…" autocomplete="off"><button id="send">Send</button></div>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" id="nudge" title="finish the current sentence, then stop">Nudge</button>
+          <button class="ghost" id="hush" title="stop now, mid-word">Hush</button>
+          <span style="flex:1"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Agent <span class="pill">tools</span></h2>
+        <p class="note">Hermes tool-calling: it calls add/now/recall, executes, then answers. Teach new tool-calls in the box below. Slow (multi-round at ~1 tok/s).</p>
+        <div id="agtrace" style="font-family:var(--mono);font-size:11.5px;color:var(--dim);min-height:20px;line-height:1.6"></div>
+        <div class="row"><input id="agq" placeholder="e.g. what is 47 plus 958?"><button id="agsend">Run</button></div>
+      </div>
+
+      <div class="panel">
+        <h2>Teach it live <span class="pill">one-shot</span></h2>
+        <p class="note">Bind a context to an answer. Persists across restarts; inert until the context appears — exactly or by near-match.</p>
+        <div class="teachgrid"><input id="src" placeholder="when I say… (context)"><input id="tgt" placeholder="answer with… (target)"></div>
+        <div class="row"><button id="teach" style="flex:1">Teach fact</button><button class="ghost" id="wipe" title="forget all facts">Wipe</button></div>
+        <div class="dials">assoc recall<input type="range" id="assoc" min="0" max="1" step="0.01" value="0.85"><b id="assocv" style="font-family:var(--mono);color:var(--accent)">0.85</b></div>
+        <div class="recall" id="recall">no associative recall yet — teach a fact, then ask a <i>related</i> question.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Live state</h2>
+        <div class="kpi"><span>throughput</span><b id="k_tps">—</b></div>
+        <div class="kpi"><span>coherence (order param)</span><b id="k_coh">—</b></div>
+        <div class="kpi"><span>state amplitude</span><b id="k_amp">—</b></div>
+        <div class="kpi"><span>decision margin</span><b id="k_mar">—</b></div>
+        <div class="kpi"><span>context tokens</span><b id="k_ctx">—</b></div>
+        <div class="kpi"><span>taught facts</span><b id="k_facts">—</b></div>
+        <div class="routes" id="routes" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat">
+    <div class="c"><div class="n" id="s_model">—</div><div class="l">model, int8 resident</div></div>
+    <div class="c"><div class="n" id="s_tps">—</div><div class="l">tokens/sec (measured, single stream)</div></div>
+    <div class="c"><div class="n">2007 Xeon</div><div class="l">no GPU · no AVX · runs on hardware you already own</div></div>
+  </div>
+
+  <div class="foot">
+    <b>How it works.</b> The forward pass is a saturable-gain oscillator medium relaxing to equilibrium — a
+    published, low-precision inference method (no dense high-precision matmul). Live learning is an associative
+    memory layered on top: a taught context is keyed by its embedding and recalled by geometric near-match, so
+    <b>related</b> prompts trigger it, not only identical ones. &nbsp;<b>Roadmap:</b> moving that association into a
+    structured memory substrate for online, local, neuromorphic restructuring — learning that reshapes the memory itself as the model runs.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const log = $("#log");
+function add(t,c){const d=document.createElement("div");d.className="msg "+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+
+/* ───────────────────────── visualizer (ported from the live dashboard) ───────────────────────── */
+var cvs=$("#cvs"), ctx=cvs.getContext("2d"), dpr=1;
+var state={cyl:null, live:{}};
+function fit(){var r=cvs.getBoundingClientRect();dpr=window.devicePixelRatio||1;cvs.width=r.width*dpr;cvs.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);}
+window.addEventListener("resize",fit); fit();
+
+var clouds=[], lastThought="", cloudSeq=0;
+function pushThought(t){
+  t=(t||"").replace(/\s+/g," ").trim(); if(!t||t===lastThought) return;
+  var add = t.indexOf(lastThought)===0 ? t.slice(lastThought.length).trim() : t;
+  lastThought=t; if(!add) return; add=add.slice(-90);
+  clouds.push({txt:add,y:-0.06,x:0.5+(Math.random()-0.5)*0.10,drift:(Math.random()-0.5)*0.00035,
+               v:0.00042+Math.random()*0.00022,seed:cloudSeq++,puff:3+Math.floor(Math.random()*3)});
+  if(clouds.length>7) clouds.shift();
+}
+function cloudPath(cx,cy,rw,rh,n,seed){ctx.beginPath();for(var i=0;i<n;i++){var f=(i/(n-1))-0.5;
+  var w2=rw*(0.42+0.30*Math.cos(f*2.1+seed)),h2=rh*(0.60+0.34*Math.sin(f*1.7+seed*0.7));
+  ctx.moveTo(cx+f*rw*1.15+w2,cy+f*rh*0.16);ctx.ellipse(cx+f*rw*1.15,cy+f*rh*0.16,w2,h2,0,0,Math.PI*2);}ctx.closePath();}
+function drawThoughtClouds(w,h){
+  for(var i=clouds.length-1;i>=0;i--){var c=clouds[i];c.y+=c.v;c.x+=c.drift;if(c.y>1.12){clouds.splice(i,1);continue;}
+    var cx=c.x*w,cy=c.y*h,a=Math.min(1,Math.max(0,(c.y+0.04)*6))*Math.min(1,Math.max(0,(1.06-c.y)*1.5));
+    if(a<=0.01)continue;var rw=Math.min(w*0.15,150),rh=rw*0.30;
+    ctx.save();ctx.globalCompositeOperation="lighter";
+    var g=ctx.createRadialGradient(cx,cy,rh*0.2,cx,cy,rw*1.5);
+    g.addColorStop(0,"rgba(120,190,255,"+(0.16*a)+")");g.addColorStop(1,"rgba(120,190,255,0)");
+    ctx.fillStyle=g;cloudPath(cx,cy,rw,rh,c.puff,c.seed);ctx.fill();ctx.restore();
+    ctx.save();ctx.globalAlpha=a;ctx.strokeStyle="rgba(150,205,255,0.20)";ctx.lineWidth=1;cloudPath(cx,cy,rw,rh,c.puff,c.seed);ctx.stroke();
+    ctx.font="10px ui-monospace,monospace";ctx.fillStyle="rgba(200,230,255,0.80)";ctx.textAlign="center";
+    var words=c.txt.split(" "),line="",lines=[];
+    for(var k=0;k<words.length;k++){var test=line?line+" "+words[k]:words[k];
+      if(ctx.measureText(test).width>rw*1.9&&line){lines.push(line);line=words[k];}else line=test;if(lines.length>=3)break;}
+    if(line&&lines.length<3)lines.push(line);
+    for(var k=0;k<lines.length;k++)ctx.fillText(lines[k],cx,cy-((lines.length-1)*5)+k*11);
+    ctx.textAlign="left";ctx.restore();}
+}
+function drawViz(){
+  var w=cvs.clientWidth,h=cvs.clientHeight,cx=w/2,cy=h/2;
+  ctx.clearRect(0,0,w,h);
+  var cyl=state.cyl;
+  if(!cyl||!cyl.rings||!cyl.rings.length){
+    ctx.font="12px ui-monospace,monospace";ctx.fillStyle="#4e6278";ctx.textAlign="center";
+    ctx.fillText("waking the engine — the ring fills as the model thinks…",cx,cy);
+    drawThoughtClouds(w,h);requestAnimationFrame(drawViz);return;}
+  var rings=cyl.rings,N=rings.length,np=cyl.n_prompt||0,R=Math.min(w,h)*0.36;
+  var FALL_AT=0.72,TURNS=1.6,pos=[];
+  for(var i=0;i<N;i++){var age=N>1?(N-1-i)/(N-1):0,fall=age<=FALL_AT?0:(age-FALL_AT)/(1-FALL_AT);
+    var a=-Math.PI/2+age*2*Math.PI+fall*TURNS*2*Math.PI,rad=R*(1-0.93*Math.pow(fall,1.35)),base=Math.min(34,Math.max(9,R*2.4/N));
+    pos.push({x:cx+rad*Math.cos(a),y:cy+rad*Math.sin(a),rr:base*(1-0.78*fall),age:age,fall:fall,al:1-0.92*Math.pow(fall,1.25)});}
+  var prox=0.35;(cyl.plugins||[]).forEach(function(p){if(p.name==="adjacency"&&p.p&&p.p.length)prox=p.p[0];});
+  for(var i=0;i<N;i++)for(var j=i+1;j<N;j++){var d=Math.abs(i-j),wrap=N-d;if(wrap<d)d=wrap;var wgt=1/(1+prox*d);if(wgt<0.18)continue;
+    var fade=wgt*0.45*Math.min(pos[i].al,pos[j].al);ctx.beginPath();ctx.moveTo(pos[i].x,pos[i].y);ctx.lineTo(pos[j].x,pos[j].y);
+    ctx.strokeStyle="rgba(90,150,220,"+fade.toFixed(3)+")";ctx.lineWidth=wgt*2.2;ctx.stroke();}
+  for(var i=0;i<N;i++){var ring=rings[i],P=pos[i],px=P.x,py=P.y,rr=P.rr,al=P.al,isPrompt=i<np;
+    ctx.beginPath();ctx.arc(px,py,rr,0,2*Math.PI);ctx.strokeStyle=(isPrompt?"rgba(0,212,255,":"rgba(255,45,120,")+(0.55*al).toFixed(3)+")";ctx.lineWidth=1.2;ctx.stroke();
+    var th=ring.th||[],rest=rr*0.72,amp=rr*0.26;
+    for(var o=0;o<th.length;o++){var oa=o/th.length*2*Math.PI-Math.PI/2,ca=Math.cos(oa),sa=Math.sin(oa),rad2=rest+amp*Math.sin(th[o]),ox=px+rad2*ca,oy=py+rad2*sa;
+      var hue=((oa*180/Math.PI)%360+360)%360,lit=Math.pow((1+Math.sin(th[o]))/2,3);
+      if(rr>9){ctx.beginPath();ctx.moveTo(px+(rest-amp)*ca,py+(rest-amp)*sa);ctx.lineTo(px+(rest+amp)*ca,py+(rest+amp)*sa);
+        ctx.strokeStyle="hsla("+hue+",70%,60%,"+(0.22*al).toFixed(3)+")";ctx.lineWidth=1;ctx.stroke();}
+      ctx.beginPath();ctx.arc(ox,oy,(1.4+lit*1.8)*(1-0.7*P.fall),0,2*Math.PI);ctx.fillStyle="hsla("+hue+",85%,"+(40+lit*32).toFixed(0)+"%,"+al.toFixed(3)+")";ctx.fill();}
+    ctx.beginPath();ctx.arc(px,py,rr*(0.20+0.5*(ring.coh||0)),0,2*Math.PI);ctx.strokeStyle="rgba(255,214,0,"+((0.25+0.55*(ring.coh||0))*al).toFixed(3)+")";ctx.lineWidth=1.4;ctx.stroke();
+    if(rr>8){var lab=ring.lab||("#"+ring.t);ctx.font="9px ui-monospace,monospace";ctx.textAlign="center";
+      ctx.fillStyle=(isPrompt?"rgba(0,212,255,":"rgba(255,45,120,")+al.toFixed(3)+")";ctx.fillText(String(lab).slice(0,10),px,py+rr+11);}}
+  var g=ctx.createRadialGradient(cx,cy,0,cx,cy,R*0.12);g.addColorStop(0,"rgba(255,45,120,0.20)");g.addColorStop(1,"rgba(255,45,120,0)");
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,R*0.12,0,2*Math.PI);ctx.fill();
+  ctx.font="bold 11px ui-monospace,monospace";ctx.fillStyle="#ff2d78";ctx.textAlign="left";ctx.fillText("CYLINDER — live geometry",12,20);
+  ctx.font="9px ui-monospace,monospace";ctx.fillStyle="#4e6278";
+  ctx.fillText("step "+cyl.step+"   rings "+N+" ("+np+" prompt)   coupling prox="+prox.toFixed(2),12,34);
+  drawThoughtClouds(w,h);requestAnimationFrame(drawViz);
+}
+requestAnimationFrame(drawViz);
+
+/* ───────────────────────── telemetry + monologue poll (/cyl) ───────────────────────── */
+async function pollCyl(){
+  try{
+    const j = await (await fetch("/cyl")).json();
+    if(j.cyl) state.cyl=j.cyl;
+    if(j.voice!==undefined){ pushThought(j.voice);
+      const m=$("#mono"); if(j.voice.trim()){m.className="mono";m.textContent=j.voice.trim();}
+    }
+    const vs=j.voice_state;
+    if(vs){
+      const bar=(lab,val)=>`<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;margin:2px 0">`
+        +`<span style="color:var(--dim);width:20px">${lab}</span>`
+        +`<span style="flex:1;height:6px;background:#0a0f18;border-radius:3px;overflow:hidden"><i style="display:block;height:100%;width:${Math.round(val*100)}%;background:linear-gradient(90deg,var(--accent2),var(--accent))"></i></span>`
+        +`<span style="color:var(--ink);width:38px;text-align:right">${val.toFixed(3)}</span></div>`;
+      const crit = (vs.regime||"").indexOf("critical")===0;
+      $("#couplings").innerHTML=`<div class="note" style="margin:0 0 5px">self-measured couplings — what it's reading right now `
+        +`<span style="color:var(--dim)">(${vs.dim} units · ${vs.neighbors} neighbors · amp ${vs.amp})</span></div>`
+        +bar("r1",vs.r1)+bar("r2",vs.r2)+bar("r3",vs.r3)+bar("r4",vs.r4)
+        +`<div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;margin-top:6px">`
+        +`<span style="color:var(--dim)">pr</span>`
+        +`<span style="flex:1;height:6px;background:#0a0f18;border-radius:3px;overflow:hidden"><i style="display:block;height:100%;width:${Math.round((vs.pr||0)*100)}%;background:var(--dim)"></i></span>`
+        +`<span style="color:var(--ink);width:38px;text-align:right">${(vs.pr||0).toFixed(3)}</span></div>`
+        +`<div style="margin-top:7px;font-size:12px">regime: <b style="color:${crit?'var(--accent)':'var(--warn)'}">${vs.regime||'—'}</b>`
+        +`<span style="color:var(--dim);font-size:11px"> &nbsp;(lock←r1 · noise←pr · stay in the middle)</span></div>`;
+    }
+    const L=j.live||{};
+    if(L.tok_per_s) $("#k_tps").textContent=(+L.tok_per_s).toFixed(2)+" tok/s";
+    if(L.coh!=null) $("#k_coh").textContent=L.coh;
+    if(L.amp!=null) $("#k_amp").textContent=L.amp;
+    if(L.margin!=null) $("#k_mar").textContent=L.margin;
+    if(L.ctx!=null) $("#k_ctx").textContent=L.ctx;
+    const rr=$("#routes");
+    if(L.routes&&L.routes.length){
+      rr.innerHTML=L.routes.map((r,i)=>`<div class="r${i===0?' win':''}"><span>${JSON.stringify(r.t)}</span>`
+        +`<span class="bar2"><i style="width:${Math.round(r.p*100)}%"></i></span><span>${(r.p*100).toFixed(1)}%</span></div>`).join("");
+    }
+  }catch(e){}
+}
+
+async function health(){
+  try{const h=await (await fetch("/health")).json();
+    $("#hostline").textContent=(h.model||"engine")+" · "+(h.weights_gb||"?")+" GB int8";
+    $("#s_model").textContent=h.model||"llama3b";
+    if(h.sec_per_token)$("#s_tps").textContent=(1/h.sec_per_token).toFixed(2);
+  }catch(e){$("#hostline").textContent="engine offline";}
+}
+async function plastic(p){const qs=p?"?"+new URLSearchParams(p):"";try{return await (await fetch("/plastic"+qs)).json();}catch(e){return null;}}
+function showRecall(p){
+  $("#k_facts").textContent=(p&&p.facts!=null)?p.facts:"—";
+  if(p&&p.last_fact_assoc){const r=$("#recall");r.className="recall hit";
+    r.innerHTML=`associatively recalled → <b>${p.last_fact_assoc.target}</b>`
+      +`<div class="bar"><i style="width:${Math.round(p.last_fact_assoc.score*100)}%"></i></div>`
+      +`<div style="font-size:11px;margin-top:4px;color:var(--dim)">near-match ${p.last_fact_assoc.score} (threshold ${p.fact_assoc})</div>`;}
+}
+
+/* ───────────────────────── chat ───────────────────────── */
+let busy=false, chatHistory=[];   // [{role,text},...] prior turns -> real multi-turn context
+async function ask(){
+  if(busy)return;const q=$("#q").value.trim();if(!q)return;
+  busy=true;$("#send").disabled=true;$("#q").value="";add(q,"me");const bubble=add("…","ai think");
+  let reply="";
+  try{
+    const r=await (await fetch("/generate",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({prompt:q,n:512,history:chatHistory,system:"You are Phox, a concise helpful assistant."})})).json();
+    let done=false;
+    while(!done){await new Promise(z=>setTimeout(z,300));
+      const j=await (await fetch(r.poll)).json();
+      if(j.text){bubble.className="msg ai";bubble.textContent=j.text;reply=j.text;log.scrollTop=log.scrollHeight;}
+      done=(j.state==="done"||j.state==="error");
+      if(j.state==="error"){bubble.textContent="[error] "+(j.error||"");reply="";}}
+  }catch(e){bubble.textContent="[network error] "+e;}
+  if(reply){ chatHistory.push({role:"user",text:q},{role:"assistant",text:reply});
+    if(chatHistory.length>16) chatHistory=chatHistory.slice(-16); }   // cap growth (~8 exchanges)
+  showRecall(await plastic());busy=false;$("#send").disabled=false;$("#q").focus();
+}
+$("#send").onclick=ask;
+$("#q").addEventListener("keydown",e=>{if(e.key==="Enter")ask();});
+$("#agsend").onclick=async()=>{
+  const q=$("#agq").value.trim(); if(!q) return; const t=$("#agtrace"); $("#agq").value="";
+  t.innerHTML='<span style="color:var(--warn)">running… (slow, multi-round)</span>';
+  try{
+    const r=await (await fetch("/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt:q})})).json();
+    let done=false;
+    while(!done){await new Promise(z=>setTimeout(z,1500));
+      const j=await (await fetch(r.poll)).json();
+      const tr=(j.trace||[]).map(s=>`<div>→ <b style="color:var(--accent)">${s.call.name}</b>(${JSON.stringify(s.call.arguments)}) = ${JSON.stringify(s.result)}</div>`).join("");
+      t.innerHTML=tr+(j.answer?`<div style="color:var(--ink);margin-top:5px">${j.answer}</div>`:'<div style="color:var(--warn)">thinking…</div>');
+      done=(j.state==="done"||j.state==="error");
+      if(j.state==="error")t.innerHTML='<span style="color:#ff6b6b">'+(j.error||'error')+'</span>';}
+  }catch(e){t.innerHTML='<span style="color:#ff6b6b">'+e+'</span>';}
+};
+$("#agq").addEventListener("keydown",e=>{if(e.key==="Enter")$("#agsend").click();});
+$("#teach").onclick=async()=>{const s=$("#src").value.trim(),t=$("#tgt").value.trim();if(!s||!t)return;
+  const r=await (await fetch("/learn?"+new URLSearchParams({source:s,target:t}))).json();
+  $("#src").value="";$("#tgt").value="";if(r.facts!=null)$("#k_facts").textContent=r.facts;
+  const b=add(`✓ taught: “${s}” → “${t}”`,"ai");b.style.color="var(--accent)";};
+$("#wipe").onclick=async()=>{await plastic({wipe:1});showRecall(await plastic());add("facts wiped.","ai");};
+$("#assoc").oninput=e=>{$("#assocv").textContent=(+e.target.value).toFixed(2);};
+$("#assoc").onchange=async e=>{await plastic({fact_assoc:e.target.value});};
+
+/* ───────────────────────── controls: nudge/hush + voice start/stop ───────────────────────── */
+function interrupt(a){ fetch("/interrupt?action="+a).catch(()=>{}); }
+$("#nudge").onclick=()=>interrupt("nudge");
+$("#hush").onclick=()=>{interrupt("gag");};
+async function voicePause(on){ try{await fetch("/voice/pause?on="+(on?1:0));}catch(e){}
+  const p=$("#voice-pill"); p.textContent=on?"paused":"always on"; }
+$("#v-stop").onclick=()=>voicePause(true);
+$("#v-start").onclick=()=>voicePause(false);
+
+/* recent thoughts from the persistent log */
+async function pollVoiceLog(){
+  try{
+    const j=await (await fetch("/voice/log?n=8&reason=partial")).json();
+    const rows=(j.rows||[]).filter(r=>(r.text||"").trim());
+    $("#vlog").innerHTML=rows.slice().reverse().map(r=>{
+      const t=(r.text||"").replace(/\s+/g," ").trim().slice(-110);
+      return `<div style="padding:3px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent2)">▸</span> ${t}</div>`;
+    }).join("") || '<div style="color:var(--dim)">(quiet — start the monologue)</div>';
+  }catch(e){}
+}
+
+health();plastic().then(showRecall);pollVoiceLog();
+setInterval(pollCyl,250);
+setInterval(()=>plastic().then(showRecall),3000);
+setInterval(pollVoiceLog,4000);
+setInterval(health,8000);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+*.so
+*.int8
+*.int8.json
+__pycache__/
+*.pyc
+llama3b*
+*.bin
